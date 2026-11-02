@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoramento Meteorológico</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+    
+    <style>
+        body, html { margin: 0; padding: 0; font-family: Arial, sans-serif; overflow: hidden; }
+        #app-container { display: flex; height: 100vh; width: 100vw; }
+        
+        #sidebar { width: 320px; background: #f8f9fa; border-right: 1px solid #ddd; display: flex; flex-direction: column; z-index: 2; }
+        #sidebar-header { padding: 20px; background: #007BFF; color: white; }
+        .cabecalho-acoes { display: flex; justify-content: space-between; align-items: center; }
+        .cabecalho-acoes h2 { margin: 0; font-size: 18px; }
+        .btn-novo { background: white; color: #007BFF; border: none; padding: 5px 10px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .btn-novo:hover { background: #e9ecef; }
+        #busca-dispositivo { width: 100%; padding: 8px; margin-top: 15px; border: none; border-radius: 4px; outline: none; box-sizing: border-box; }
+        
+        #lista-dispositivos { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex-grow: 1; }
+        .item-dispositivo { padding: 15px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .item-dispositivo:hover { background: #e9ecef; }
+        .info-disp { cursor: pointer; flex-grow: 1; }
+        .info-disp strong { display: block; font-size: 14px; color: #333; }
+        .info-disp small { color: #666; font-size: 12px; }
+        
+        /* Ajuste visual para os botões ficarem lado a lado */
+        .botoes-acao { display: flex; gap: 5px; }
+        .btn-editar, .btn-deletar { cursor: pointer; padding: 5px; font-size: 16px; background: none; border: none; border-radius: 4px; }
+        .btn-editar:hover { background: #d0e5ff; }
+        .btn-deletar:hover { background: #ffd0d0; }
+
+        #map-container { flex-grow: 1; position: relative; }
+        #map { height: 100%; width: 100%; z-index: 1; }
+        
+        #painel-grafico { display: none; position: absolute; top: 20px; right: 20px; width: 450px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0px 4px 15px rgba(0,0,0,0.3); z-index: 1000; }
+        .fechar { float: right; cursor: pointer; font-size: 18px; font-weight: bold; color: #666; }
+        #controles-grafico { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; margin-top: 10px; }
+        select { padding: 5px; border-radius: 5px; border: 1px solid #ccc; outline: none; }
+        #resumo-estatisticas { background: #e9f5ff; border: 1px solid #b8daff; border-radius: 8px; padding: 10px; text-align: center; margin-bottom: 15px; }
+        #resumo-estatisticas span { font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+        #resumo-estatisticas strong { display: block; font-size: 26px; color: #007BFF; margin-top: 5px; }
+
+        /* Estilo do Formulário Modal */
+        #modal-cadastro { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 2000; justify-content: center; align-items: center; }
+        .modal-conteudo { background: white; padding: 25px; border-radius: 10px; width: 320px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+        .modal-conteudo h3 { margin-top: 0; margin-bottom: 15px; color: #333; }
+        .modal-conteudo label { font-size: 13px; color: #555; }
+        .modal-conteudo input { width: 100%; padding: 8px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .modal-botoes { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+        .btn-cancelar { background: #ccc; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; }
+        .btn-salvar { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <div id="sidebar">
+            <div id="sidebar-header">
+                <div class="cabecalho-acoes">
+                    <h2>Estações</h2>
+                    <button class="btn-novo" onclick="abrirModalCadastro()">+ Nova</button>
+                </div>
+                <input type="text" id="busca-dispositivo" placeholder="Pesquisar estação..." onkeyup="filtrarLista()">
+            </div>
+            <ul id="lista-dispositivos"></ul>
+        </div>
+
+        <div id="map-container">
+            <div id="map"></div>
+            <div id="painel-grafico">
+                <span class="fechar" onclick="fecharGrafico()">X</span>
+                <h3 id="titulo-grafico" style="margin: 0;">Dispositivo</h3>
+                <div id="controles-grafico">
+                    <small style="color: #666;">Intervalo de exibição:</small>
+                    <select id="seletor-periodo" onchange="mudarPeriodo()">
+                        <option value="diario">Diário (24 Horas)</option>
+                        <option value="semanal">Semanal (7 Dias)</option>
+                        <option value="mensal">Mensal (30 Dias)</option>
+                    </select>
+                </div>
+                <div id="resumo-estatisticas">
+                    <span>Média do Período</span>
+                    <strong id="valor-media">--</strong>
+                </div>
+                <canvas id="graficoCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- JANELA MODAL DE CADASTRO/EDIÇÃO -->
+    <div id="modal-cadastro">
+        <div class="modal-conteudo">
+            <h3 id="modal-titulo">Nova Estação</h3>
+            <form id="form-dispositivo" onsubmit="salvarDispositivo(event)">
+                <input type="hidden" id="nome-original">
+                <label>Nome da Estação:</label>
+                <input type="text" id="form-nome" required placeholder="Ex: EM-CAMPINAS-003">
+                <div style="display: flex; gap: 10px;">
+                    <div><label>Latitude:</label><input type="text" id="form-lat" required placeholder="-22.9099"></div>
+                    <div><label>Longitude:</label><input type="text" id="form-lng" required placeholder="-47.0626"></div>
+                </div>
+                <label>Parâmetro (Ex: Temperatura):</label>
+                <input type="text" id="form-parametro" required>
+                <label>Unidade (Ex: °C):</label>
+                <input type="text" id="form-unidade" required>
+                <div class="modal-botoes">
+                    <button type="button" class="btn-cancelar" onclick="fecharModal()">Cancelar</button>
+                    <button type="submit" class="btn-salvar">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const map = L.map('map').setView([-22.9099, -47.0626], 11);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+
+        let chartInstance = null;
+        let markersLayer = L.markerClusterGroup({ spiderfyOnMaxZoom: true, showCoverageOnHover: false, zoomToBoundsOnClick: true });
+        map.addLayer(markersLayer);
+
+        let todosDispositivos = [];
+        let dicionarioMarcadores = {}; 
+        
+        let nomeAtivo = null, parametroAtivo = null, unidadeAtiva = null, periodoAtivo = 'diario'; 
+
+        function carregarDispositivos() {
+            fetch('http://localhost:3000/api/dispositivos')
+                .then(res => res.json())
+                .then(dispositivos => {
+                    todosDispositivos = dispositivos;
+                    markersLayer.clearLayers(); 
+                    dicionarioMarcadores = {}; 
+
+                    dispositivos.forEach(disp => {
+                        let lat = parseFloat(String(disp.latitude).replace(',', '.'));
+                        let lng = parseFloat(String(disp.longitude).replace(',', '.'));
+
+                        if (!isNaN(lat) && !isNaN(lng)) {
+                            const marker = L.marker([lat, lng]);
+                            marker.bindTooltip(`${disp.nome} (${disp.parametro})`, { permanent: false, direction: 'top' });
+                            marker.on('click', () => selecionarDispositivo(disp.nome, disp.parametro, disp.unidade));
+                            markersLayer.addLayer(marker);
+                            dicionarioMarcadores[disp.nome] = marker; 
+                        }
+                    });
+                    renderizarLista(todosDispositivos);
+                });
+        }
+
+        function renderizarLista(lista) {
+            const ul = document.getElementById('lista-dispositivos');
+            ul.innerHTML = '';
+            lista.forEach(disp => {
+                const li = document.createElement('li');
+                li.className = 'item-dispositivo';
+                
+                // NOVO: Adicionado o botão de Deletar (🗑️)
+                li.innerHTML = `
+                    <div class="info-disp">
+                        <strong>${disp.nome}</strong>
+                        <small>${disp.parametro} (${disp.unidade})</small>
+                    </div>
+                    <div class="botoes-acao">
+                        <button class="btn-editar" title="Editar">✏️</button>
+                        <button class="btn-deletar" title="Excluir">🗑️</button>
+                    </div>
+                `;
+                
+                li.querySelector('.info-disp').onclick = () => focarNoMapa(disp.nome, disp.parametro, disp.unidade);
+                
+                li.querySelector('.btn-editar').onclick = (e) => {
+                    e.stopPropagation(); 
+                    abrirModalEdicao(disp.nome);
+                };
+
+                // NOVO: Ação ao clicar na Lixeira
+                li.querySelector('.btn-deletar').onclick = (e) => {
+                    e.stopPropagation(); 
+                    deletarDispositivo(disp.nome);
+                };
+                
+                ul.appendChild(li);
+            });
+        }
+
+        // --- DELETAR DISPOSITIVO ---
+        function deletarDispositivo(nome) {
+            if (confirm(`ATENÇÃO!\nTem certeza que deseja APAGAR a estação "${nome}"?\nEsta ação não poderá ser desfeita.`)) {
+                fetch(`http://localhost:3000/api/dispositivos/${encodeURIComponent(nome)}`, {
+                    method: 'DELETE'
+                })
+                .then(res => res.json())
+                .then(resposta => {
+                    if (resposta.erro) {
+                        alert("Erro ao excluir. Verifique se existem medições vinculadas a esta estação no banco de dados.");
+                        console.error(resposta.erro);
+                    } else {
+                        alert(resposta.mensagem);
+                        carregarDispositivos(); // Atualiza a tela
+                    }
+                })
+                .catch(err => alert("Falha na comunicação com o servidor."));
+            }
+        }
+
+        function abrirModalCadastro() {
+            document.getElementById('modal-titulo').innerText = 'Nova Estação';
+            document.getElementById('nome-original').value = '';
+            document.getElementById('form-dispositivo').reset();
+            document.getElementById('modal-cadastro').style.display = 'flex';
+        }
+
+        function abrirModalEdicao(nome) {
+            const disp = todosDispositivos.find(d => d.nome === nome);
+            if (!disp) return;
+            document.getElementById('modal-titulo').innerText = 'Editar Estação';
+            document.getElementById('nome-original').value = disp.nome; 
+            document.getElementById('form-nome').value = disp.nome;
+            document.getElementById('form-lat').value = disp.latitude;
+            document.getElementById('form-lng').value = disp.longitude;
+            document.getElementById('form-parametro').value = disp.parametro;
+            document.getElementById('form-unidade').value = disp.unidade;
+            document.getElementById('modal-cadastro').style.display = 'flex';
+        }
+
+        function fecharModal() {
+            document.getElementById('modal-cadastro').style.display = 'none';
+        }
+
+        function salvarDispositivo(event) {
+            event.preventDefault();
+            const nomeOriginal = document.getElementById('nome-original').value;
+            const dados = {
+                nome: document.getElementById('form-nome').value,
+                latitude: document.getElementById('form-lat').value.replace(',', '.'),
+                longitude: document.getElementById('form-lng').value.replace(',', '.'),
+                parametro: document.getElementById('form-parametro').value,
+                unidade: document.getElementById('form-unidade').value
+            };
+            const url = nomeOriginal ? `http://localhost:3000/api/dispositivos/${encodeURIComponent(nomeOriginal)}` : 'http://localhost:3000/api/dispositivos';
+            const metodo = nomeOriginal ? 'PUT' : 'POST';
+
+            fetch(url, {
+                method: metodo,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(dados)
+            }).then(res => res.json()).then(resposta => {
+                if (resposta.erro) { alert("Erro ao salvar!"); console.error(resposta.erro); }
+                else { alert(resposta.mensagem); fecharModal(); carregarDispositivos(); }
+            }).catch(err => alert("Falha na conexão."));
+        }
+
+        function filtrarLista() {
+            const texto = document.getElementById('busca-dispositivo').value.toLowerCase();
+            renderizarLista(todosDispositivos.filter(d => d.nome.toLowerCase().includes(texto) || d.parametro.toLowerCase().includes(texto)));
+        }
+
+        function focarNoMapa(nome, parametro, unidade) {
+            const marcador = dicionarioMarcadores[nome];
+            if (marcador) {
+                markersLayer.zoomToShowLayer(marcador, () => {
+                    marcador.openTooltip();
+                    selecionarDispositivo(nome, parametro, unidade);
+                });
+            }
+        }
+
+        function selecionarDispositivo(nome, parametro, unidade) {
+            nomeAtivo = nome; parametroAtivo = parametro; unidadeAtiva = unidade;
+            document.getElementById('titulo-grafico').innerText = nome;
+            document.getElementById('painel-grafico').style.display = 'block';
+            carregarDadosGrafico();
+        }
+
+        function mudarPeriodo() {
+            periodoAtivo = document.getElementById('seletor-periodo').value;
+            if(nomeAtivo) carregarDadosGrafico(); 
+        }
+
+        function carregarDadosGrafico() {
+            fetch(`http://localhost:3000/api/leituras/${encodeURIComponent(nomeAtivo)}?periodo=${periodoAtivo}`)
+                .then(res => res.json())
+                .then(dados => {
+                    const rotulos = dados.map(d => {
+                        const data = new Date(d.intervalo_tempo);
+                        if (periodoAtivo === 'mensal') return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                        else if (periodoAtivo === 'semanal') return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        else return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                    });
+                    
+                    const valoresNumericos = dados.map(d => parseFloat(d.media_valor));
+                    
+                    if (valoresNumericos.length > 0) {
+                        const soma = valoresNumericos.reduce((acc, val) => acc + val, 0);
+                        document.getElementById('valor-media').innerText = `${(soma / valoresNumericos.length).toFixed(2)} ${unidadeAtiva}`;
+                    } else {
+                        document.getElementById('valor-media').innerText = "Sem dados";
+                    }
+
+                    renderizarGrafico(rotulos, valoresNumericos.map(v => v.toFixed(2)));
+                });
+        }
+
+        function renderizarGrafico(rotulos, valores) {
+            const ctx = document.getElementById('graficoCanvas').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: rotulos,
+                    datasets: [{
+                        label: `${parametroAtivo} (${unidadeAtiva})`,
+                        data: valores,
+                        borderColor: '#007BFF', backgroundColor: 'rgba(0, 123, 255, 0.2)',
+                        borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3
+                    }]
+                },
+                options: { responsive: true, animation: false }
+            });
+        }
+
+        function fecharGrafico() { document.getElementById('painel-grafico').style.display = 'none'; nomeAtivo = null; }
+
+        function atualizarDashboard() {
+            carregarDispositivos();
+            if (nomeAtivo !== null && document.getElementById('painel-grafico').style.display === 'block') carregarDadosGrafico();
+        }
+
+        carregarDispositivos();
+        setInterval(atualizarDashboard, 900000); 
+    </script>
+</body>
+</html>
